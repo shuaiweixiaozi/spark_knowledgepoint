@@ -1,0 +1,64 @@
+package myown.momo.spark.core
+
+import org.apache.spark.{SparkConf, SparkContext}
+
+import scala.collection.immutable.HashSet
+
+/**
+  * Created by hzhb on 2017/8/21.
+  */
+object PopularMovieAnalyzer {
+  def main(args: Array[String]): Unit = {
+    var dataPath = "D:\\scalaworkspace\\sparktraining-master\\data\\ml-1m"
+    val conf = new SparkConf().setAppName("PopularMovieAnalyzer")
+    if(args.length > 0){
+      dataPath = args(0)
+    }else{
+      conf.setMaster("local[2]")
+    }
+    val sc = new SparkContext(conf)
+
+    /*
+    step1: Create RDDs
+     */
+    val DATA_PATH = dataPath
+    val USER_AGE = "18"
+
+    val usersRdd = sc.textFile(DATA_PATH + "/users.dat")
+    val moviesRdd = sc.textFile(DATA_PATH + "/movies.dat")
+    val ratingsRdd = sc.textFile(DATA_PATH + "/ratings.dat")
+
+    /*
+    step 2:Extract columns from RDDs
+     */
+    //users:RDD[(userID,age)]
+    val users = usersRdd.map(_.split("::")).map{ x=> (x(0),x(2))}.filter(_._2.equals(USER_AGE))
+
+    //Array[String]
+    val userlist = users.map(_._1).collect()
+    val userSet = HashSet() ++ userlist  //++ 该方法用于连接两个集合，list1++list2
+
+    val broadcastUserSet = sc.broadcast(userSet)
+
+    /*
+    step 3:map-side join RDDS
+     */
+    val topKmovies = ratingsRdd.map(_.split("::")).map{ x=> (x(0),x(1))}.filter(x => broadcastUserSet.value.contains(x._1))
+          .map(x => (x._2,1))
+          .reduceByKey(_ + _)
+          .map(x => (x._2,x._1))
+          .sortByKey(false)
+          .map(x => (x._2,x._1))
+          .take(10)
+
+    /*
+    Transfrom filmID to fileName
+     */
+    val movieID2Name = moviesRdd.map(_.split("::")).map(x => (x(0),x(1)))
+          .collect().toMap
+    topKmovies.map(x => (movieID2Name.getOrElse(x._1,null),x._2)).foreach(println)
+
+    println(System.currentTimeMillis())
+    sc.stop()
+  }
+}
